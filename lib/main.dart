@@ -5,7 +5,10 @@ import 'ui/dashboard_page.dart';
 import 'state/theme_provider.dart';
 
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Charge les variables d'environnement depuis .env (bundlé comme asset)
   await dotenv.load(fileName: ".env");
+
   runApp(const ProviderScope(child: MyApp()));
 }
 

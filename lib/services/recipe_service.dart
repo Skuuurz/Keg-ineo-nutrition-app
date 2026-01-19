@@ -9,7 +9,13 @@ import '../models/recipe.dart';
 class RecipeService {
   const RecipeService();
 
-  static String get openAIApiKey => dotenv.env['OPENAI_API_KEY'] ?? '';
+  static String get openAIApiKey {
+    final key = dotenv.env['OPENAI_API_KEY'];
+    if (key == null || key.isEmpty) {
+      throw Exception('Clé API OpenAI non trouvée dans le fichier .env');
+    }
+    return key;
+  }
 
   Future<List<Recipe>> suggestRecipes(
     List<IngredientStock> stock, {
@@ -87,7 +93,6 @@ Répond STRICTEMENT en JSON, sans texte autour, du type :
   ]
 }
 ''';
-
     final response = await http.post(
       Uri.parse('https://api.openai.com/v1/chat/completions'),
       headers: {
