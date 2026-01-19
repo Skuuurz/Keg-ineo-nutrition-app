@@ -2172,10 +2172,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                                       .read(profilesProvider.notifier)
                                       .toggleMultiProfileSelection(profile.id);
                                 } else {
-                                  // En mode simple, sélectionner comme unique
-                                  ref
-                                      .read(profilesProvider.notifier)
-                                      .selectProfile(profile.id);
+                                  // En mode simple, toggle la sélection du profil
+                                  if (currentId == profile.id) {
+                                    // Si déjà sélectionné, on désélectionne
+                                    ref
+                                        .read(profilesProvider.notifier)
+                                        .selectProfile(null);
+                                  } else {
+                                    // Sinon, on sélectionne ce profil
+                                    ref
+                                        .read(profilesProvider.notifier)
+                                        .selectProfile(profile.id);
+                                  }
                                 }
                               },
                               onLongPress: () {
@@ -2372,10 +2380,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                                 ),
                                 trailing: IconButton(
                                   icon: const Icon(Icons.delete_outline),
-                                  onPressed: () {
-                                    ref
-                                        .read(favoritesProvider.notifier)
-                                        .toggleFavorite(recipe);
+                                  onPressed: () async {
+                                    if (currentId == null) return;
+                                    await FavoritesStorage.removeForProfile(
+                                      currentId,
+                                      recipe,
+                                    );
+                                    if (mounted) setState(() {});
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Recette supprimée des favoris',
+                                        ),
+                                      ),
+                                    );
                                   },
                                 ),
                                 onTap: () {

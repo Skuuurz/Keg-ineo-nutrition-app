@@ -23,4 +23,13 @@ class FavoritesStorage {
       jsonEncode(favorites.map((r) => r.toJson()).toList()),
     );
   }
+
+  /// Remove a single recipe from a profile's favorites.
+  /// Matches by `title`; if multiple entries share the same title,
+  /// all of them will be removed.
+  static Future<void> removeForProfile(String profileId, Recipe recipe) async {
+    final existing = await loadForProfile(profileId);
+    final next = existing.where((r) => r.title != recipe.title).toList();
+    await saveForProfile(profileId, next);
+  }
 }
