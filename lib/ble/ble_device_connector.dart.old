@@ -1,0 +1,148 @@
+// lib/ble/ble_device_connector.dart
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+
+class BleDeviceConnector {
+  final FlutterReactiveBle _ble = FlutterReactiveBle();
+
+  StreamSubscription<ConnectionStateUpdate>? _connectionSub;
+  StreamSubscription<List<int>>? _notifySub;
+
+  QualifiedCharacteristic? _txNotifyChar; // ESP32 -> App (notify)
+  QualifiedCharacteristic? _rxWriteChar; // App -> ESP32 (write)
+
+  bool _connected = false;
+  bool get isConnected => _connected;
+
+  final StringBuffer _rxBuffer = StringBuffer();
+
+  Future<void> connectAndListen({
+    required String deviceId,
+    required Uuid serviceId,
+    required Uuid txNotifyCharId, // TX: notify
+    required Uuid rxWriteCharId, // RX: write
+    required void Function(String jsonObject) onJson,
+    void Function(String log)? onLog,
+  }) async {
+    await disconnect();
+
+    _connectionSub = _ble
+        .connectToDevice(
+          id: deviceId,
+          connectionTimeout: const Duration(seconds: 12),
+        )
+        .listen(
+          (update) async {
+            onLog?.call('BLE state: ${update.connectionState}');
+
+            if (update.connectionState == DeviceConnectionState.connected) {
+              _connected = true;
+
+              // Petit délai Android : CCCD/notify parfois “rate” sans ça
+              await Future.delayed(const Duration(milliseconds: 400));
+              // Tente de découvrir les services (Android peut nécessiter ça)
+              try {
+                await _ble.discoverServices(deviceId);
+              } catch (e) {
+                debugPrint('⚠️ discoverServices failed: $e');
+              }
+              // Prépare les characteristics
+              _txNotifyChar = QualifiedCharacteristic(
+                deviceId: deviceId,
+                serviceId: serviceId,
+                characteristicId: txNotifyCharId,
+              );
+
+              _rxWriteChar = QualifiedCharacteristic(
+                deviceId: deviceId,
+                serviceId: serviceId,
+                characteristicId: rxWriteCharId,
+              );
+
+              // Subscribe notify
+              _notifySub = _ble
+                  .subscribeToCharacteristic(_txNotifyChar!)
+                  .listen((data) {
+                    if (data.isEmpty) return;
+
+                    final chunk = utf8.decode(data, allowMalformed: true);
+                    _rxBuffer.write(chunk);
+
+                    _extractJsonObjects((obj) {
+                      onJson(obj);
+                    });
+                  }, onError: (e) => onLog?.call('❌ notify error: $e'));
+
+              onLog?.call('✅ Connected + notify subscribed');
+            }
+
+            if (update.connectionState == DeviceConnectionState.disconnected) {
+              _connected = false;
+              onLog?.call('⚠️ Disconnected');
+            }
+          },
+          onError: (e) {
+            _connected = false;
+            onLog?.call('❌ connect error: $e');
+          },
+        );
+  }
+
+  // Extrait tous les objets JSON complets {...} depuis le buffer (gère la fragmentation BLE)
+  void _extractJsonObjects(void Function(String obj) onObj) {
+    var s = _rxBuffer.toString();
+
+    while (true) {
+      final start = s.indexOf('{');
+      if (start < 0) break;
+
+      final end = s.indexOf('}', start);
+      if (end < 0) break;
+
+      final jsonStr = s.substring(start, end + 1).trim();
+      onObj(jsonStr);
+
+      s = s.substring(end + 1);
+    }
+
+    _rxBuffer
+      ..clear()
+      ..write(s);
+  }
+
+  Future<void> sendText(String text, {bool withoutResponse = true}) async {
+    final ch = _rxWriteChar;
+    if (ch == null) return;
+
+    final bytes = utf8.encode(text);
+    try {
+      if (withoutResponse) {
+        await _ble.writeCharacteristicWithoutResponse(ch, value: bytes);
+      } else {
+        await _ble.writeCharacteristicWithResponse(ch, value: bytes);
+      }
+      debugPrint('✅ BLE sent: $text');
+    } catch (e) {
+      debugPrint('❌ BLE send error: $e');
+    }
+  }
+
+  Future<void> disconnect() async {
+    await _notifySub?.cancel();
+    await _connectionSub?.cancel();
+    _notifySub = null;
+    _connectionSub = null;
+
+    _txNotifyChar = null;
+    _rxWriteChar = null;
+
+    _connected = false;
+    _rxBuffer.clear();
+  }
+
+  void dispose() {
+    disconnect();
+  }
+}
